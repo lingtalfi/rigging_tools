@@ -3,7 +3,7 @@
 bl_info = {
     "name": "My Custom Rigging Tools",
     "author": "Talfi",
-    "version": (1, 5, 0),
+    "version": (1, 6, 0),
     "blender": (4, 4, 0),
     "location": "View3D > UI > Rig UI, and available for import",
     "description": "A personal library of reusable rigging utility functions and operators.",
@@ -148,8 +148,77 @@ class DEBUG_OT_dissect_bone_matrix(bpy.types.Operator):
 
 
 #============================================================
+#  STATE MANAGEMENT CLASSES 
+#============================================================
+
+class RigUIStateItem(bpy.types.PropertyGroup):
+    is_expanded: bpy.props.BoolProperty(name="Is Expanded", default=True)
+
+class RigUIStateManager(bpy.types.PropertyGroup):
+    box_states: bpy.props.CollectionProperty(type=RigUIStateItem)
+
+    def get_box_state(self, box_id, default=True):
+        if box_id not in self.box_states:
+            item = self.box_states.add()
+            item.name = box_id
+            item.is_expanded = default
+        return self.box_states[box_id].is_expanded
+
+    def set_box_state(self, box_id, value):
+        if box_id not in self.box_states:
+            item = self.box_states.add()
+            item.name = box_id
+        self.box_states[box_id].is_expanded = value
+
+class WM_OT_RigUIToggleBox(bpy.types.Operator):
+    """A simple operator to toggle the expanded state of a box."""
+    bl_idname = "wm.rig_ui_toggle_box"
+    bl_label = "Toggle UI Box"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    box_id: bpy.props.StringProperty()
+
+    def execute(self, context):
+        # This is where you can add your debug print statement!
+        print(f"Toggling box with ID: {self.box_id}") 
+        
+        state_manager = context.window_manager.rig_ui_state
+        current_state = state_manager.get_box_state(self.box_id)
+        state_manager.set_box_state(self.box_id, not current_state)
+        
+        # This forces the UI to redraw immediately after the state changes.
+        # It's important for responsiveness.
+        for region in context.area.regions:
+            if region.type == 'UI':
+                region.tag_redraw()
+                
+        return {'FINISHED'}
+
+#============================================================
 #  REUSABLE UI DRAWING FUNCTION (The "UI Component")
 #============================================================
+def draw_collapsible_box(layout, context, box_id, text, icon='NONE', default_expanded=True):
+    state_manager = context.window_manager.rig_ui_state
+    is_expanded = state_manager.get_box_state(box_id, default=default_expanded)
+
+    box = layout.box()
+    row = box.row()
+    row.alignment = 'LEFT'
+    
+    # --- THE FINAL FIX ---
+    # We use an operator, which allows us to pass the unique box_id.
+    # We make it look like a property toggle by using text="" and emboss=False.
+    op = row.operator("wm.rig_ui_toggle_box", 
+                      icon="TRIA_DOWN" if is_expanded else "TRIA_RIGHT",
+                      text="", emboss=False) # emboss=False makes it flat like a prop
+    op.box_id = box_id # Pass the unique ID to the operator instance
+    
+    row.label(text=text, icon=icon)
+
+    if is_expanded:
+        return box.column()
+    return None
+
 def draw_collection_button(layout, collection_name, text=None, show_solo_button=False):
     """
     Draws a visibility toggle for a bone collection, with an optional built-in solo button.
@@ -187,21 +256,6 @@ def draw_collection_button(layout, collection_name, text=None, show_solo_button=
         # If no solo button is needed, just draw the simple visibility toggle
         layout.prop(collection, 'is_visible', text=text, toggle=True)
 
-def draw_debug_panel(layout, context):
-    """Draws a standard, collapsible debug tools panel with a Dissect button."""
-    debug_box = layout.box()
-    row = debug_box.row()
-    row.alignment = 'LEFT'
-    
-    row.prop(context.scene, "rig_tools_debug_expanded",
-             icon="TRIA_DOWN" if context.scene.rig_tools_debug_expanded else "TRIA_RIGHT",
-             icon_only=True, emboss=False)
-    row.label(text="Debug Tools")
-
-    if context.scene.rig_tools_debug_expanded:
-        col = debug_box.column()
-        col.operator("debug.dissect_bone_matrix", icon='CONSOLE')
-
 
 
 #============================================================
@@ -213,14 +267,19 @@ classes = (
     RIG_OT_snap_bone_chain,
     RIG_OT_snap_to_ik_with_pole,
     DEBUG_OT_dissect_bone_matrix,
+    RigUIStateItem,
+    RigUIStateManager,
+    WM_OT_RigUIToggleBox,
 )
 
 def register():
-    bpy.types.Scene.rig_tools_debug_expanded = bpy.props.BoolProperty(
-        name="Expand Rig Tools Debug", default=False) 
-           
+
     for cls in classes:
         bpy.utils.register_class(cls)
+
+    # Add a POINTER to our State Manager class on Blender's Window Manager.
+    # This creates a single, global instance of our state manager.
+    bpy.types.WindowManager.rig_ui_state = bpy.props.PointerProperty(type=RigUIStateManager)        
 
 
 
@@ -231,7 +290,9 @@ def register():
     print(f"{addon_name} (v{version_string}) loaded successfully.")
 
 def unregister():
-    del bpy.types.Scene.rig_tools_debug_expanded    
+
+    del bpy.types.WindowManager.rig_ui_state
+    
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
 
