@@ -3,7 +3,7 @@
 bl_info = {
     "name": "My Custom Rigging Tools",
     "author": "Talfi",
-    "version": (1, 6, 0),
+    "version": (1, 7, 0),
     "blender": (4, 4, 0),
     "location": "View3D > UI > Rig UI, and available for import",
     "description": "A personal library of reusable rigging utility functions and operators.",
@@ -17,6 +17,20 @@ from mathutils.geometry import intersect_point_line
 #============================================================
 #  UTILITY FUNCTIONS (The "Engine")
 #============================================================
+def _find_collection_recursive(collections, name):
+    """Helper to recursively search for a bone collection by name."""
+    # First, check the current level of collections
+    if name in collections:
+        return collections[name]
+    
+    # If not found, recurse into children
+    for coll in collections:
+        found_in_child = _find_collection_recursive(coll.children, name)
+        if found_in_child:
+            return found_in_child
+            
+    return None
+
 
 def copy_bone_transform(source_bone, target_bone):
     source_rest_matrix = source_bone.bone.matrix_local
@@ -222,41 +236,29 @@ def draw_collapsible_box(layout, context, box_id, text, icon='NONE', default_exp
 def draw_collection_button(layout, collection_name, text=None, show_solo_button=False):
     """
     Draws a visibility toggle for a bone collection, with an optional built-in solo button.
-
-    :param layout: The layout object to draw on (e.g., a row or column).
-    :param collection_name: The string name of the bone collection.
-    :param text: Optional custom text for the button. If None, it's auto-generated.
-    :param show_solo_button: If True, a solo toggle star will be drawn.
+    This version includes a recursive search to handle nested collections.
     """
     rig = bpy.context.active_object
     if not (rig and rig.type == 'ARMATURE'):
         return
 
-    collections = rig.data.collections
+    # Use the recursive helper function to find the collection
+    collection = _find_collection_recursive(rig.data.collections, collection_name)
     
-    if collection_name not in collections:
+    if collection is None:
         layout.label(text=f"'{collection_name}'?", icon='ERROR')
         return
 
     if text is None:
         text = collection_name.replace("_", " ").title()
 
-    collection = collections[collection_name]
-
-    # --- New, Simplified Drawing Logic ---
+    # --- Drawing Logic (remains the same) ---
     if show_solo_button:
-        # Create a row to hold both the visibility and solo toggles
         row = layout.row(align=True)
-        # The main visibility toggle. 'toggle=True' makes it a checkbox.
         row.prop(collection, 'is_visible', text=text, toggle=True)
-        # The built-in solo toggle. This is the star icon.
-        # It has no text and is just the icon. 'toggle=True' is implied.
         row.prop(collection, 'is_solo', text="", icon='VIS_SEL_11')
     else:
-        # If no solo button is needed, just draw the simple visibility toggle
         layout.prop(collection, 'is_visible', text=text, toggle=True)
-
-
 
 #============================================================
 #  REGISTRATION
